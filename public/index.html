@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Azure Zero Trust Assessment</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f4f4f4;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 2rem auto;
+      padding: 2rem;
+      background-color: #fff;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    h1, h2 {
+      text-align: center;
+      color: #333;
+    }
+    form {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    input, select, textarea, button {
+      padding: 10px;
+      font-size: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+    button {
+      background-color: #0078d4;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+    table {
+      width: 100%;
+      margin-top: 2rem;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 10px;
+      border: 1px solid #ddd;
+      text-align: left;
+    }
+    th {
+      background-color: #f4f4f4;
+    }
+    .PASS { color: green; font-weight: bold; }
+    .FAIL { color: red; font-weight: bold; }
+    .ERROR { color: orange; font-weight: bold; }
+    .loader {
+      display: none;
+      text-align: center;
+      font-weight: bold;
+      margin: 1rem 0;
+    }
+    .logo-center {
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+      margin-top: 30px;
+      margin-bottom: 10px;
+      height: 60px;
+    }
+    h1 {
+      text-align: center;
+      margin-top: 0;
+      margin-bottom: 20px;
+      color: #2d6ca2;
+    }
+  </style>
+</head>
+<body>
+  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/Microsoft_Azure.svg/225px-Microsoft_Azure.svg.png" alt="Logo" class="logo-center">
+  <h1>ZT Assessment Tool</h1>
+  <div style="text-align:right; max-width:1200px; margin:0 auto;">
+    <button id="downloadReportBtn" style="padding:10px 24px; font-size:1em; background:#0078d4; color:#fff; border:none; border-radius:6px; cursor:pointer; display:none;">
+      Download Report
+    </button>
+  </div>
+  <div class="container">
+    <form id="scanForm">
+      <label>Environment:</label>
+      <select id="env" required>
+        <option value="">Select Environment</option>
+        <option value="DEV">DEV</option>
+        <option value="PROD">PROD</option>
+      </select>
+
+      <label>Subscription ID:</label>
+      <input type="text" id="subscriptionId" required />
+
+      <label>Azure Client ID:</label>
+      <input type="text" id="clientId" required />
+
+      <label>Azure Client Secret:</label>
+      <input type="password" id="clientSecret" required />
+
+      <button type="submit" id="scanBtn" disabled>Scan</button>
+    </form>
+
+    <div class="loader" id="loader">Scanning in progress...</div>
+
+    <!-- Violations Table -->
+    <h2>Violating Resources</h2>
+    <table id="violationsTable" style="display:none;">
+      <thead>
+        <tr>
+          <th>Policy</th>
+          <th>Status</th>
+          <th>Reason</th>
+          <th>Violating Resources</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <!-- Scanned Resources Table -->
+    <h2>Scanned Resources</h2>
+    <table id="scannedTable" style="display:none;">
+      <thead>
+        <tr>
+          <th>Resource Name</th>
+          <th>Resource Type</th>
+          <th>Remark</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <script>
+    const envSelect = document.getElementById('env');
+    const subscriptionInput = document.getElementById('subscriptionId');
+    const clientIdInput = document.getElementById('clientId');
+    const clientSecretInput = document.getElementById('clientSecret');
+    const scanBtn = document.getElementById('scanBtn');
+    const loader = document.getElementById('loader');
+
+    const violationsTable = document.getElementById('violationsTable');
+    const violationsBody = violationsTable.querySelector('tbody');
+
+    const scannedTable = document.getElementById('scannedTable');
+    const scannedBody = scannedTable.querySelector('tbody');
+
+    envSelect.addEventListener('change', toggleScanBtn);
+    subscriptionInput.addEventListener('input', toggleScanBtn);
+    clientIdInput.addEventListener('input', toggleScanBtn);
+    clientSecretInput.addEventListener('input', toggleScanBtn);
+
+    function toggleScanBtn() {
+      const env = envSelect.value;
+      const subId = subscriptionInput.value.trim();
+      const clientId = clientIdInput.value.trim();
+      const clientSecret = clientSecretInput.value.trim();
+      const valid = env && subId && clientId && clientSecret;
+      scanBtn.disabled = !valid;
+    }
+
+    const downloadBtn = document.getElementById('downloadReportBtn');
+    let reportPath = null;
+
+    document.getElementById('scanForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      loader.style.display = 'block';
+      violationsTable.style.display = 'none';
+      scannedTable.style.display = 'none';
+      violationsBody.innerHTML = '';
+      scannedBody.innerHTML = '';
+      downloadBtn.style.display = 'none';
+      reportPath = null;
+
+      const subscriptionId = subscriptionInput.value.trim();
+      const clientId = document.getElementById('clientId').value.trim();
+      const clientSecret = document.getElementById('clientSecret').value.trim();
+      const env = envSelect.value;
+
+      const res = await fetch('/assessment/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subscriptionId,
+          clientId,
+          clientSecret,
+          env
+        })
+      });
+
+      const data = await res.json();
+      loader.style.display = 'none';
+
+      for (const item of data.results || []) {
+        // === Violations Table ===
+        const vtr = document.createElement('tr');
+        const policy = document.createElement('td');
+        policy.textContent = item.policy;
+
+        const status = document.createElement('td');
+        status.textContent = item.status;
+        status.className = item.status;
+
+        const reason = document.createElement('td');
+        reason.textContent = item.reason || item.error || '';
+
+        const violations = document.createElement('td');
+        if (item.violatingResources?.length) {
+          violations.textContent = item.violatingResources.map(r => `${r.name} (${r.resourceType || r.id || r.resourceGroup})`).join('; ');
+        } else {
+          violations.textContent = 'NA';
+        }
+
+        vtr.appendChild(policy);
+        vtr.appendChild(status);
+        vtr.appendChild(reason);
+        vtr.appendChild(violations);
+        violationsBody.appendChild(vtr);
+
+        // === Scanned Table ===
+        if (item.scannedResources?.length) {
+          item.scannedResources.forEach(res => {
+            const str = document.createElement('tr');
+            const name = document.createElement('td');
+            name.textContent = res.name || '-';
+
+            const type = document.createElement('td');
+            type.textContent = res.resourceType || '-';
+
+            const remark = document.createElement('td');
+            remark.textContent = res.remark || res.Remark || res.status || 'Checked';
+
+            str.appendChild(name);
+            str.appendChild(type);
+            str.appendChild(remark);
+            scannedBody.appendChild(str);
+          });
+        }
+      }
+
+      violationsTable.style.display = 'table';
+      scannedTable.style.display = 'table';
+
+      // Enable download button if reportPath is available
+      if (data.reportPath) {
+        reportPath = data.reportPath;
+        downloadBtn.style.display = 'inline-block';
+      }
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      if (reportPath) {
+        // Force download by creating a hidden link
+        const a = document.createElement('a');
+        a.href = reportPath;
+        a.download = reportPath.split('/').pop();
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+    });
+  </script>
+</body>
+</html>
